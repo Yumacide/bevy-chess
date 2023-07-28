@@ -20,7 +20,7 @@ const PIECES: [u8; 64] = [
 	8, 9, 10, 11, 12, 10, 9, 8
 ];
 
-#[derive(Component, Debug)]
+#[derive(Component, Debug, PartialEq)]
 enum Team {
     White,
     Black,
@@ -39,15 +39,20 @@ enum PieceType {
 #[derive(Component)]
 struct Position(u8, u8);
 
+#[derive(Component)]
+struct PieceMarker;
+
 #[derive(Bundle)]
 struct Piece {
     team: Team,
     ty: PieceType,
     position: Position,
-    sprite_bundle: SpriteBundle,
 }
 
-fn get_piece_image(team: Team, ty: PieceType) -> String {
+#[derive(Resource)]
+struct PlayerTeam(Team);
+
+fn get_piece_image(team: &Team, ty: &PieceType) -> String {
     let team = match team {
         Team::Black => "black",
         Team::White => "white",
@@ -84,21 +89,29 @@ fn spawn_pieces(mut commands: Commands, asset_server: Res<AssetServer>) {
         };
 
         let x = (i % 8 + 1) as u8;
-        let y = 9 - (i / 8 + 1) as u8;
+        let y = (i / 8 + 1) as u8;
+        println!("{team:?} {ty:?} at {x} {y}");
 
-        commands.spawn(SpriteBundle {
-            texture: asset_server.load(get_piece_image(team, ty)),
-            sprite: Sprite {
-                custom_size: Some(Vec2::new(SQUARE_LENGTH, SQUARE_LENGTH)),
+        commands
+            .spawn(SpriteBundle {
+                texture: asset_server.load(get_piece_image(&team, &ty)),
+                sprite: Sprite {
+                    custom_size: Some(Vec2::new(SQUARE_LENGTH, SQUARE_LENGTH)),
+                    ..default()
+                },
+                transform: Transform::from_translation(Vec3::new(
+                    SQUARE_LENGTH * (x as f32) - SQUARE_LENGTH * 4.5,
+                    SQUARE_LENGTH * ((9 - y) as f32) - SQUARE_LENGTH * 4.5,
+                    0.0,
+                )),
                 ..default()
-            },
-            transform: Transform::from_translation(Vec3::new(
-                SQUARE_LENGTH * (x as f32) - SQUARE_LENGTH * 4.5,
-                SQUARE_LENGTH * (y as f32) - SQUARE_LENGTH * 4.5,
-                0.0,
-            )),
-            ..default()
-        });
+            })
+            .insert(Piece {
+                team,
+                ty,
+                position: Position(x, y),
+            })
+            .insert(PieceMarker);
     }
 }
 
@@ -128,16 +141,31 @@ fn spawn_board(mut commands: Commands) {
     }
 }
 
-fn move_piece(
+fn select_piece(
     mut input: EventReader<MouseButtonInput>,
     primary_query: Query<&Window, With<PrimaryWindow>>,
+    piece_query: Query<(&Team, &PieceType, &Position), With<PieceMarker>>,
+    player_team: ResMut<PlayerTeam>,
 ) {
     let Ok(primary) = primary_query.get_single() else {
         return;
     };
 
     for event in input.iter() {
-        if event.state == ButtonState::Pressed {}
+        if event.state == ButtonState::Released && event.button == MouseButton::Left {
+            if let Some(square) = get_square(primary.cursor_position().unwrap(), primary) {
+                for (team, ty, position) in piece_query.iter() {
+                    if position.0 != square.0 || position.1 != square.1 {
+                        continue;
+                    }
+                    if *team != player_team.0 {
+                        return;
+                    }
+                    println!("selecting {team:?} {ty:?} at {square:?}");
+                    break;
+                }
+            }
+        }
     }
 }
 
@@ -159,6 +187,7 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_startup_system(spawn_board)
         .add_startup_system(spawn_pieces)
-        .add_system(move_piece)
+        .add_system(select_piece)
+        .insert_resource(PlayerTeam(Team::White))
         .run();
 }
